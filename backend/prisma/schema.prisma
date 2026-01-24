@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum MediaType {
+  MOVIE
+  BOOK
+  SHOW
+  GAME
+}
+
+enum TagCategory {
+  MOOD
+  THEME
+  GENRE
+  TROPE
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  username     String   @unique
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  reviews Review[]
+  lists   List[]
+
+  @@map("users")
+}
+
+model MediaItem {
+  id          String    @id @default(cuid())
+  type        MediaType
+  title       String
+  description String?   @db.Text
+  releaseYear Int?      @map("release_year")
+  language    String?
+  posterUrl   String?   @map("poster_url")
+  externalId  String?   @map("external_id") // TMDb ID, ISBN, etc.
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  embedding MediaEmbedding?
+  tags      MediaTag[]
+  reviews   Review[]
+  listItems ListItem[]
+
+  @@index([type])
+  @@index([title])
+  @@index([externalId])
+  @@map("media_items")
+}
+
+model MediaEmbedding {
+  id           String   @id @default(cuid())
+  mediaId      String   @unique @map("media_id")
+  pineconeId   String   @unique @map("pinecone_id")
+  modelVersion String   @map("model_version")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  media MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("media_embeddings")
+}
+
+model Tag {
+  id       String      @id @default(cuid())
+  name     String      @unique
+  category TagCategory
+
+  mediaItems MediaTag[]
+
+  @@map("tags")
+}
+
+model MediaTag {
+  mediaId String @map("media_id")
+  tagId   String @map("tag_id")
+
+  media MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  tag   Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([mediaId, tagId])
+  @@map("media_tags")
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  mediaId   String   @map("media_id")
+  rating    Int      @db.SmallInt // 1-5 or 1-10
+  content   String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mediaId])
+  @@map("reviews")
+}
+
+model List {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  description String?
+  isPublic    Boolean  @default(false) @map("is_public")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items ListItem[]
+
+  @@map("lists")
+}
+
+model ListItem {
+  id        String   @id @default(cuid())
+  listId    String   @map("list_id")
+  mediaId   String   @map("media_id")
+  order     Int      @default(0)
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  list  List      @relation(fields: [listId], references: [id], onDelete: Cascade)
+  media MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, mediaId])
+  @@map("list_items")
+}
