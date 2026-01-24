@@ -27,3 +27,6 @@ npm-debug.log*
 
 # Testing
 coverage/
+prisma/*.js
+prisma/*.d.ts
+prisma/*.map
