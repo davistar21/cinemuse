@@ -75,7 +75,8 @@ model MediaItem {
 model MediaEmbedding {
   id           String   @id @default(cuid())
   mediaId      String   @unique @map("media_id")
-  pineconeId   String   @unique @map("pinecone_id")
+  pineconeId   String?  @map("pinecone_id") // Optional now
+  values       Float[]  @map("vector_values") // Local vector storage
   modelVersion String   @map("model_version")
   createdAt    DateTime @default(now()) @map("created_at")
 
