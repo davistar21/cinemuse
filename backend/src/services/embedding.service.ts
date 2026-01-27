@@ -1,9 +1,27 @@
-import config from "../config/index.js";
 import { ApiError } from "../utils/ApiError.js";
+import { pipeline } from "@xenova/transformers";
 
-interface VoyageEmbeddingData {
-  data: Array<{ embedding: number[] }>;
-  usage?: { total_tokens: number };
+// Type definition for the pipeline function
+type FeatureExtractionPipeline = (
+  text: string | string[],
+  options?: { pooling?: string; normalize?: boolean },
+) => Promise<{ data: Float32Array }>;
+
+// Singleton to hold the pipeline instance
+let embeddingPipeline: FeatureExtractionPipeline | null = null;
+const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
+
+/**
+ * Get or initialize the embedding pipeline
+ */
+async function getPipeline(): Promise<FeatureExtractionPipeline> {
+  if (!embeddingPipeline) {
+    console.log(`Loading local embedding model: ${MODEL_NAME}...`);
+    // @ts-ignore - pipeline types are tricky
+    embeddingPipeline = await pipeline("feature-extraction", MODEL_NAME);
+    console.log("Model loaded successfully!");
+  }
+  return embeddingPipeline as FeatureExtractionPipeline;
 }
 
 export interface EmbeddingResponse {
@@ -15,50 +33,28 @@ export interface EmbeddingResponse {
 }
 
 /**
- * Generate embedding for a text using Voyage AI
+ * Generate embedding for a single text using local Transformer
  */
 export async function generateEmbedding(
   text: string,
 ): Promise<EmbeddingResponse> {
-  if (!config.voyage.apiKey) {
-    throw ApiError.internal("Voyage AI API key not configured");
-  }
-
   try {
-    const response = await fetch(`${config.voyage.baseUrl}/embeddings`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.voyage.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.voyage.model,
-        input: text,
-        input_type: "document",
-      }),
-    });
+    const pipe = await getPipeline();
+    const output = await pipe(text, { pooling: "mean", normalize: true });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Voyage AI error:", error);
-      throw ApiError.internal(
-        `Embedding generation failed: ${response.status}`,
-      );
-    }
-
-    const data = (await response.json()) as VoyageEmbeddingData;
+    // Convert Float32Array to number[]
+    const embedding = Array.from(output.data);
 
     return {
-      embedding: data.data[0].embedding,
-      model: config.voyage.model,
+      embedding,
+      model: MODEL_NAME,
       usage: {
-        totalTokens: data.usage?.total_tokens || 0,
+        totalTokens: text.length / 4, // Rough estimation
       },
     };
   } catch (error) {
-    if (error instanceof ApiError) throw error;
     console.error("Embedding error:", error);
-    throw ApiError.internal("Failed to generate embedding");
+    throw ApiError.internal("Failed to generate embedding locally");
   }
 }
 
@@ -66,37 +62,8 @@ export async function generateEmbedding(
  * Generate embedding for a search query
  */
 export async function generateQueryEmbedding(query: string): Promise<number[]> {
-  if (!config.voyage.apiKey) {
-    throw ApiError.internal("Voyage AI API key not configured");
-  }
-
-  try {
-    const response = await fetch(`${config.voyage.baseUrl}/embeddings`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.voyage.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.voyage.model,
-        input: query,
-        input_type: "query", // Optimized for queries
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Voyage AI error:", error);
-      throw ApiError.internal(`Query embedding failed: ${response.status}`);
-    }
-
-    const data = (await response.json()) as VoyageEmbeddingData;
-    return data.data[0].embedding;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    console.error("Query embedding error:", error);
-    throw ApiError.internal("Failed to generate query embedding");
-  }
+  const result = await generateEmbedding(query);
+  return result.embedding;
 }
 
 /**
@@ -105,41 +72,27 @@ export async function generateQueryEmbedding(query: string): Promise<number[]> {
 export async function generateBatchEmbeddings(
   texts: string[],
 ): Promise<number[][]> {
-  if (!config.voyage.apiKey) {
-    throw ApiError.internal("Voyage AI API key not configured");
-  }
-
   if (texts.length === 0) return [];
-  if (texts.length > 128) {
-    throw ApiError.badRequest("Maximum 128 texts per batch");
-  }
+
+  // Xenova pipeline can handle batches, but for stability we'll map
+  // or use the built-in batching if supported.
+  // For safety and progress tracking, we'll do sequential or Promise.all here
+  // since this model is fast.
 
   try {
-    const response = await fetch(`${config.voyage.baseUrl}/embeddings`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.voyage.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.voyage.model,
-        input: texts,
-        input_type: "document",
-      }),
-    });
+    const pipe = await getPipeline();
+    const embeddings: number[][] = [];
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Voyage AI batch error:", error);
-      throw ApiError.internal(`Batch embedding failed: ${response.status}`);
+    // Process in small sub-batches to avoid memory spikes
+    for (const text of texts) {
+      const output = await pipe(text, { pooling: "mean", normalize: true });
+      embeddings.push(Array.from(output.data));
     }
 
-    const data = (await response.json()) as VoyageEmbeddingData;
-    return data.data.map((item) => item.embedding);
+    return embeddings;
   } catch (error) {
-    if (error instanceof ApiError) throw error;
     console.error("Batch embedding error:", error);
-    throw ApiError.internal("Failed to generate batch embeddings");
+    throw ApiError.internal("Failed to generate batch embeddings locally");
   }
 }
 
