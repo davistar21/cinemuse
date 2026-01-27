@@ -11,22 +11,34 @@ import type { MemorySearchInput } from "../validations/search.validation.js";
  * and get matches based on semantic similarity
  */
 export const memorySearch = catchAsync(async (req: Request, res: Response) => {
-  const input: MemorySearchInput = req.body;
+  try {
+    const input: MemorySearchInput = req.body;
 
-  const results = await searchService.memorySearch({
-    query: input.query,
-    type: input.type,
-    limit: input.limit,
-  });
-
-  res.status(200).json({
-    success: true,
-    data: {
+    const results = await searchService.memorySearch({
       query: input.query,
-      results,
-      count: results.length,
-    },
-  });
+      type: input.type,
+      limit: input.limit,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        query: input.query,
+        results,
+        total: results.length,
+      },
+    });
+  } catch (error: any) {
+    console.error("Search Handler Error:", error);
+    res.status(500).json({
+      success: false,
+      error: {
+        message: error.message,
+        stack: error.stack,
+        details: JSON.stringify(error),
+      },
+    });
+  }
 });
 
 export default { memorySearch };
