@@ -6,6 +6,7 @@ interface UIState {
   isSearchFocused: boolean;
 
   toggleSidebar: () => void;
+  toggleSearchFocus: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSearchFocused: (focused: boolean) => void;
 }
@@ -18,6 +19,8 @@ export const useUIStore = create<UIState>()(
 
       toggleSidebar: () =>
         set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+      toggleSearchFocus: () =>
+        set((state) => ({ isSearchFocused: !state.isSearchFocused })),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
       setSearchFocused: (focused) => set({ isSearchFocused: focused }),
     }),

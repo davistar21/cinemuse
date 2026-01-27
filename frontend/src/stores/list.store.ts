@@ -1,65 +1,179 @@
-import { create } from 'zustand';
+import { create } from "zustand";
+import { api } from "@/lib/api";
 
 interface ListItem {
   id: string;
   mediaId: string;
-  order: number;
   addedAt: string;
-  // Included media details for display
   media?: {
+    id: string;
     title: string;
-    posterUrl?: string;
     type: string;
+    posterUrl: string | null;
   };
 }
 
 interface List {
   id: string;
   name: string;
-  description?: string;
-  userId: string;
-  items: ListItem[];
+  description: string | null;
+  items?: ListItem[];
   createdAt: string;
-  updatedAt: string;
 }
 
 interface ListState {
   lists: List[];
-  activeList: List | null;
+  currentList: List | null;
   isLoading: boolean;
   error: string | null;
 
+  // Actions
   setLists: (lists: List[]) => void;
-  setActiveList: (list: List) => void;
-  setLoading: (isLoading: boolean) => void;
+  setCurrentList: (list: List | null) => void;
+  setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  
-  // Optimistic updates could be added here later
   addList: (list: List) => void;
-  updateList: (id: string, updates: Partial<List>) => void;
-  deleteList: (id: string) => void;
+  removeList: (id: string) => void;
+
+  // Async actions
+  fetchLists: () => Promise<void>;
+  fetchList: (id: string) => Promise<void>;
+  createList: (name: string, description?: string) => Promise<void>;
+  deleteList: (id: string) => Promise<void>;
+  addItemToList: (listId: string, mediaId: string) => Promise<void>;
+  removeItemFromList: (listId: string, itemId: string) => Promise<void>;
 }
 
-export const useListStore = create<ListState>((set) => ({
+export const useListStore = create<ListState>((set, get) => ({
   lists: [],
-  activeList: null,
+  currentList: null,
   isLoading: false,
   error: null,
 
   setLists: (lists) => set({ lists }),
-  setActiveList: (activeList) => set({ activeList }),
-  setLoading: (isLoading) => set({ isLoading }),
+  setCurrentList: (list) => set({ currentList: list }),
+  setIsLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
-
   addList: (list) => set((state) => ({ lists: [...state.lists, list] })),
-  updateList: (id, updates) =>
-    set((state) => ({
-      lists: state.lists.map((l) => (l.id === id ? { ...l, ...updates } : l)),
-      activeList: state.activeList?.id === id ? { ...state.activeList, ...updates } : state.activeList,
-    })),
-  deleteList: (id) =>
+  removeList: (id) =>
     set((state) => ({
       lists: state.lists.filter((l) => l.id !== id),
-      activeList: state.activeList?.id === id ? null : state.activeList,
     })),
+
+  fetchLists: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await api.get<{ success: boolean; data: List[] }>(
+        "/api/lists",
+      );
+      if (response.success && response.data) {
+        set({ lists: response.data, isLoading: false });
+      } else {
+        set({ isLoading: false });
+      }
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to fetch lists",
+        isLoading: false,
+      });
+    }
+  },
+
+  fetchList: async (id: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await api.get<{ success: boolean; data: List }>(
+        `/api/lists/${id}`,
+      );
+      if (response.success && response.data) {
+        set({ currentList: response.data, isLoading: false });
+      } else {
+        set({ isLoading: false });
+      }
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to fetch list",
+        isLoading: false,
+      });
+    }
+  },
+
+  createList: async (name: string, description?: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await api.post<{ success: boolean; data: List }>(
+        "/api/lists",
+        { name, description },
+      );
+      if (response.success && response.data) {
+        set((state) => ({
+          lists: [...state.lists, response.data],
+          isLoading: false,
+        }));
+      } else {
+        set({ isLoading: false });
+      }
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to create list",
+        isLoading: false,
+      });
+    }
+  },
+
+  deleteList: async (id: string) => {
+    try {
+      await api.delete(`/api/lists/${id}`);
+      set((state) => ({
+        lists: state.lists.filter((l) => l.id !== id),
+      }));
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to delete list",
+      });
+    }
+  },
+
+  addItemToList: async (listId: string, mediaId: string) => {
+    try {
+      const response = await api.post<{ success: boolean; data: ListItem }>(
+        `/api/lists/${listId}/items`,
+        { mediaId },
+      );
+      if (response.success && response.data) {
+        const { currentList } = get();
+        if (currentList && currentList.id === listId) {
+          set({
+            currentList: {
+              ...currentList,
+              items: [...(currentList.items || []), response.data],
+            },
+          });
+        }
+      }
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to add item",
+      });
+    }
+  },
+
+  removeItemFromList: async (listId: string, itemId: string) => {
+    try {
+      await api.delete(`/api/lists/${listId}/items/${itemId}`);
+      const { currentList } = get();
+      if (currentList && currentList.id === listId) {
+        set({
+          currentList: {
+            ...currentList,
+            items: (currentList.items || []).filter((i) => i.id !== itemId),
+          },
+        });
+      }
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to remove item",
+      });
+    }
+  },
 }));
