@@ -1,153 +1,50 @@
 # CineMuse Backend
 
-Memory-based media discovery and recommendation API.
+The engine behind CineMuse's semantic discovery.
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-- **Runtime:** Node.js
-- **Framework:** Express.js
-- **Language:** TypeScript
-- **ORM:** Prisma
-- **Database:** PostgreSQL
-- **Vector DB:** Pinecone
-- **Embeddings:** Voyage AI
+- **Node.js & Express:** Production-ready API structure.
+- **Prisma:** Modern database toolkit for PostgreSQL.
+- **Groq SDK:** High-performance LLM integration for query expansion.
+- **Transformers.js:** Local embedding generation for efficient similarity scoring.
+- **Zod:** Schema-first validation for all API inputs.
 
-## Getting Started
+## 📂 Structure
 
-### Prerequisites
+- `src/controllers`: Request handling and response formatting.
+- `src/services`: Business logic, AI integration, and DB interaction.
+- `src/routes`: API endpoint definitions.
+- `src/middleware`: Auth, error handling, and validation.
+- `prisma/`: Database schema and seed data.
 
-- Node.js 18+
-- PostgreSQL database (see [Render setup guide](../docs/render-setup.md))
-- Pinecone account (see [Pinecone setup guide](../docs/pinecone-setup.md))
-- Voyage AI account (see [Voyage AI setup guide](../docs/voyage-ai-setup.md))
+## 🤖 AI Search Flow
 
-### Installation
+1. **Request:** User sends a natural language query.
+2. **Expansion:** Groq (Llama 3) translates the query into conceptual keywords and similar titles.
+3. **Database:** Postgres performs a broad keyword search against titles, descriptions, and tags.
+4. **Ranking:** Results are ordered by relevance to the expanded concept set.
 
-```bash
-# Navigate to backend
-cd backend
-
-# Install dependencies
-npm install
-
-# Copy environment template
-cp .env.example .env
-
-# Fill in your environment variables in .env
-```
-
-### Environment Variables
-
-```env
-PORT=3001
-NODE_ENV=development
-DATABASE_URL=postgresql://...
-JWT_SECRET=your-secret-key
-VOYAGE_API_KEY=pa-xxx
-VOYAGE_MODEL=voyage-2
-PINECONE_API_KEY=pcsk_xxx
-PINECONE_INDEX=cinemuse
-```
-
-### Database Setup
-
-```bash
-# Generate Prisma client
-npm run db:generate
-
-# Push schema to database
-npm run db:push
-
-# (Optional) Open Prisma Studio
-npm run db:studio
-```
-
-### Running
-
-```bash
-# Development mode (with hot reload)
-npm run dev
-
-# Production build
-npm run build
-npm start
-```
-
-## API Endpoints
-
-### Authentication
-
-| Method | Endpoint                | Description       |
-| ------ | ----------------------- | ----------------- |
-| POST   | `/api/v1/auth/register` | Register new user |
-| POST   | `/api/v1/auth/login`    | Login user        |
-| GET    | `/api/v1/auth/me`       | Get current user  |
-
-### Media
-
-| Method | Endpoint                    | Description       | Auth  |
-| ------ | --------------------------- | ----------------- | ----- |
-| GET    | `/api/v1/media`             | List all media    | -     |
-| GET    | `/api/v1/media/search?q=`   | Keyword search    | -     |
-| GET    | `/api/v1/media/:id`         | Get media by ID   | -     |
-| GET    | `/api/v1/media/:id/similar` | Get similar items | -     |
-| POST   | `/api/v1/media`             | Create media      | Admin |
-| PATCH  | `/api/v1/media/:id`         | Update media      | Admin |
-| DELETE | `/api/v1/media/:id`         | Delete media      | Admin |
+## 🔌 API Endpoints
 
 ### Search
 
-| Method | Endpoint                | Description            |
-| ------ | ----------------------- | ---------------------- |
-| POST   | `/api/v1/search/memory` | Semantic memory search |
+- `POST /api/v1/search/memory` - Semantic/Memory-based search.
+  - Body: `{ "query": string, "type": "MOVIE" | "BOOK" | "SHOW" | "GAME" }`
 
-**Example:**
+### Auth
 
-```json
-POST /api/v1/search/memory
-{
-  "query": "A movie where a guy keeps reliving the same day",
-  "type": "MOVIE",
-  "limit": 5
-}
-```
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
 
-### Lists
+### Media
 
-| Method | Endpoint                          | Description    | Auth    |
-| ------ | --------------------------------- | -------------- | ------- |
-| POST   | `/api/v1/lists`                   | Create list    | User    |
-| GET    | `/api/v1/lists/:id`               | Get list       | Partial |
-| PATCH  | `/api/v1/lists/:id`               | Update list    | Owner   |
-| DELETE | `/api/v1/lists/:id`               | Delete list    | Owner   |
-| POST   | `/api/v1/lists/:id/items`         | Add item       | Owner   |
-| DELETE | `/api/v1/lists/:id/items/:itemId` | Remove item    | Owner   |
-| GET    | `/api/v1/users/:userId/lists`     | Get user lists | Partial |
+- `GET /api/v1/media` - Paginated media list.
+- `GET /api/v1/media/:id` - Detailed view.
 
-## Project Structure
+## 🚀 Local Development
 
-```
-src/
-├── config/          # Configuration & database
-├── controllers/     # Request handlers
-├── middleware/      # Express middleware
-├── routes/          # API routes
-├── services/        # Business logic
-├── utils/           # Helpers
-├── validations/     # Zod schemas
-├── app.ts           # Express app
-└── server.ts        # Entry point
-```
-
-## Scripts
-
-| Script                | Description              |
-| --------------------- | ------------------------ |
-| `npm run dev`         | Start development server |
-| `npm run build`       | Build for production     |
-| `npm start`           | Start production server  |
-| `npm run db:generate` | Generate Prisma client   |
-| `npm run db:migrate`  | Run migrations           |
-| `npm run db:push`     | Push schema to DB        |
-| `npm run db:seed`     | Seed database            |
-| `npm run db:studio`   | Open Prisma Studio       |
+1. `npm install`
+2. Configure `.env` with `DATABASE_URL` and `GROQ_API_KEY`.
+3. `npx prisma db push` to setup schema.
+4. `npm run dev` to start.
