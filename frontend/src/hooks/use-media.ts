@@ -42,10 +42,24 @@ export function useMedia(id: string | null) {
     setError(null);
 
     try {
-      const response = await api.get<MediaResponse>(`/api/media/${mediaId}`);
+      const response = await api.get<any>(`/media/${mediaId}`);
 
       if (response.success && response.data) {
-        setMedia(response.data);
+        // Backend returns wrapped object { data: { media: ... } }
+        const item = (response.data as any).media || response.data;
+
+        const transformed: MediaItem = {
+          ...item,
+          type: item.type?.toLowerCase() as any,
+          year: item.releaseYear,
+          rating: 4.5, // Placeholder rating for now as backend doesn't aggregate yet
+          genres: item.tags
+            ? item.tags
+                .filter((t: any) => t.category === "GENRE")
+                .map((t: any) => t.name)
+            : [],
+        };
+        setMedia(transformed);
       } else {
         setMedia(null);
         setError("Media not found");

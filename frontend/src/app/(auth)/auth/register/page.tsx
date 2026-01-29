@@ -23,6 +23,7 @@ export default function RegisterPage() {
   const { setAuth } = useAuthStore();
 
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -41,7 +42,7 @@ export default function RegisterPage() {
           user: any;
           token: string;
         };
-      }>("/api/auth/register", { name, email, password });
+      }>("/auth/register", { name, username, email, password });
 
       if (response.success && response.data) {
         setAuth(response.data.user, response.data.token);
@@ -97,6 +98,35 @@ export default function RegisterPage() {
           </div>
         </div>
 
+        {/* Username */}
+        <div className="space-y-2">
+          <Label htmlFor="username" style={{ color: "var(--text-secondary)" }}>
+            Username
+          </Label>
+          <div className="relative">
+            <User
+              className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4"
+              style={{ color: "var(--text-muted)" }}
+            />
+            <Input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="username"
+              className="pl-10"
+              style={{
+                backgroundColor: "var(--bg-surface)",
+                borderColor: "var(--border)",
+                color: "var(--text-primary)",
+              }}
+              required
+              minLength={3}
+              maxLength={30}
+            />
+          </div>
+        </div>
+
         {/* Email */}
         <div className="space-y-2">
           <Label htmlFor="email" style={{ color: "var(--text-secondary)" }}>
@@ -147,7 +177,7 @@ export default function RegisterPage() {
                 color: "var(--text-primary)",
               }}
               required
-              minLength={6}
+              minLength={8}
             />
             <button
               type="button"

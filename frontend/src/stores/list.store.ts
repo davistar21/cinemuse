@@ -64,7 +64,7 @@ export const useListStore = create<ListState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await api.get<{ success: boolean; data: List[] }>(
-        "/api/lists",
+        "/lists",
       );
       if (response.success && response.data) {
         set({ lists: response.data, isLoading: false });
@@ -83,7 +83,7 @@ export const useListStore = create<ListState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await api.get<{ success: boolean; data: List }>(
-        `/api/lists/${id}`,
+        `/lists/${id}`,
       );
       if (response.success && response.data) {
         set({ currentList: response.data, isLoading: false });
@@ -102,7 +102,7 @@ export const useListStore = create<ListState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await api.post<{ success: boolean; data: List }>(
-        "/api/lists",
+        "/lists",
         { name, description },
       );
       if (response.success && response.data) {
@@ -123,7 +123,7 @@ export const useListStore = create<ListState>((set, get) => ({
 
   deleteList: async (id: string) => {
     try {
-      await api.delete(`/api/lists/${id}`);
+      await api.delete(`/lists/${id}`);
       set((state) => ({
         lists: state.lists.filter((l) => l.id !== id),
       }));
@@ -137,7 +137,7 @@ export const useListStore = create<ListState>((set, get) => ({
   addItemToList: async (listId: string, mediaId: string) => {
     try {
       const response = await api.post<{ success: boolean; data: ListItem }>(
-        `/api/lists/${listId}/items`,
+        `/lists/${listId}/items`,
         { mediaId },
       );
       if (response.success && response.data) {
@@ -160,7 +160,7 @@ export const useListStore = create<ListState>((set, get) => ({
 
   removeItemFromList: async (listId: string, itemId: string) => {
     try {
-      await api.delete(`/api/lists/${listId}/items/${itemId}`);
+      await api.delete(`/lists/${listId}/items/${itemId}`);
       const { currentList } = get();
       if (currentList && currentList.id === listId) {
         set({

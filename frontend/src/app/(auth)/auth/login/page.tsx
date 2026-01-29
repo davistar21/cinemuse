@@ -40,7 +40,7 @@ export default function LoginPage() {
           user: any; // Type as any to allow mapping to Store User
           token: string;
         };
-      }>("/api/auth/login", { email, password });
+      }>("/auth/login", { email, password });
 
       if (response.success && response.data) {
         setAuth(response.data.user, response.data.token);

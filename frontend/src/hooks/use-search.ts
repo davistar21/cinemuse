@@ -52,7 +52,17 @@ export function useSearch() {
         });
 
         if (response.success && response.data) {
-          setResults(response.data.results);
+          const transformed = response.data.results.map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            type: item.type.toLowerCase() as any,
+            posterUrl: item.posterUrl,
+            year: item.releaseYear,
+            rating: item.score ? item.score * 5 : null, // Convert 0-1 score to 0-5 stars
+            score: item.score,
+            description: item.description,
+          }));
+          setResults(transformed);
           setTotal(response.data.total);
         } else {
           setResults([]);
