@@ -3,31 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-}
-
-// ============================================
-// ENUMS
-// ============================================
-
-enum Role {
-  USER
-  ADMIN
-}
-
-enum MediaType {
-  MOVIE
-  BOOK
-  SHOW
-  GAME
-}
-
-enum TagCategory {
-  MOOD
-  THEME
-  GENRE
-  TROPE
 }
 
 // ============================================
@@ -39,7 +16,7 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   username     String   @unique
-  role         Role     @default(USER)
+  role         String   @default("USER") // USER, ADMIN
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -50,16 +27,16 @@ model User {
 }
 
 model MediaItem {
-  id          String    @id @default(cuid())
-  type        MediaType
+  id          String   @id @default(cuid())
+  type        String   // MOVIE, BOOK, SHOW, GAME
   title       String
-  description String?   @db.Text
-  releaseYear Int?      @map("release_year")
+  description String?
+  releaseYear Int?     @map("release_year")
   language    String?
-  posterUrl   String?   @map("poster_url")
-  externalId  String?   @map("external_id") // TMDb ID, ISBN, etc.
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  posterUrl   String?  @map("poster_url")
+  externalId  String?  @map("external_id") // TMDb ID, ISBN, etc.
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   embedding MediaEmbedding?
   tags      MediaTag[]
@@ -75,8 +52,8 @@ model MediaItem {
 model MediaEmbedding {
   id           String   @id @default(cuid())
   mediaId      String   @unique @map("media_id")
-  pineconeId   String?  @map("pinecone_id") // Optional now
-  values       Float[]  @map("vector_values") // Local vector storage
+  pineconeId   String?  @map("pinecone_id")
+  values       String   @map("vector_values") // JSON string of Float[]
   modelVersion String   @map("model_version")
   createdAt    DateTime @default(now()) @map("created_at")
 
@@ -86,9 +63,9 @@ model MediaEmbedding {
 }
 
 model Tag {
-  id       String      @id @default(cuid())
-  name     String      @unique
-  category TagCategory
+  id       String @id @default(cuid())
+  name     String @unique
+  category String // MOOD, THEME, GENRE, TROPE
 
   mediaItems MediaTag[]
 
@@ -110,8 +87,8 @@ model Review {
   id        String   @id @default(cuid())
   userId    String   @map("user_id")
   mediaId   String   @map("media_id")
-  rating    Int      @db.SmallInt // 1-5 or 1-10
-  content   String?  @db.Text
+  rating    Int      // 1-5 or 1-10
+  content   String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

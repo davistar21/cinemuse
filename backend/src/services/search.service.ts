@@ -1,8 +1,10 @@
 import prisma from "../config/database.js";
 import { ApiError } from "../utils/ApiError.js";
-import { MediaType } from "@prisma/client";
+// MediaType is now a string field, not an enum (SQLite)
 import * as embeddingService from "./embedding.service.js";
 import * as mediaService from "./media.service.js";
+import * as tmdbService from "./tmdb.service.js";
+import * as pineconeService from "./pinecone.service.js";
 
 export interface SearchResult {
   id: string;
@@ -37,6 +39,18 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+/**
+ * Parse embedding values from SQLite JSON string
+ */
+function parseEmbeddingValues(values: string | number[]): number[] {
+  if (Array.isArray(values)) return values;
+  try {
+    return JSON.parse(values);
+  } catch {
+    return [];
+  }
+}
+
 import * as groqService from "./groq.service.js";
 
 /**
@@ -55,12 +69,7 @@ export async function memorySearch(
     console.log(`✨ Expanded to:`, keywords);
 
     // 2. Perform broad keyword search
-    // We'll search for each keyword and aggregate results
-    // Ideally we'd use a more complex query, but loop is simple for now
-
     const allResults = new Map<string, SearchResult>();
-
-    // Also include original query
     const terms = [...new Set([query, ...keywords])];
 
     for (const term of terms) {
@@ -82,17 +91,119 @@ export async function memorySearch(
             description: item.description,
             releaseYear: item.releaseYear,
             posterUrl: item.posterUrl,
-            score: term === query ? 1.0 : 0.8, // Higher score for exact original matches
+            score: term === query ? 1.0 : 0.8,
             tags: item.tags.map((t) => ({ name: t.name })),
           });
         }
       });
     }
 
-    return Array.from(allResults.values()).slice(0, limit);
+    let results = Array.from(allResults.values()).slice(0, limit);
+
+    // 3. REACTIVE FALLBACK (TMDB)
+    // If we have very few results, ask TMDB directly using expanded keywords
+    // TMDB expects a title, not a description, so we try each keyword
+    if (results.length === 0) {
+      console.log(
+        `🧊 Cold Start: No local results for "${query}". Checking TMDB with keywords...`,
+      );
+
+      // Try each keyword (prioritize capitalized ones - likely titles)
+      let tmdbResult = null;
+
+      // Sort: capitalized words first (likely movie titles), then others
+      const sortedKeywords = [...keywords].sort((a, b) => {
+        const aIsTitle = a && a[0] === a[0]?.toUpperCase() && a.includes(" ");
+        const bIsTitle = b && b[0] === b[0]?.toUpperCase() && b.includes(" ");
+        if (aIsTitle && !bIsTitle) return -1;
+        if (!aIsTitle && bIsTitle) return 1;
+        return 0;
+      });
+
+      // Skip generic genre words
+      const genericWords = [
+        "science fiction",
+        "action",
+        "romance",
+        "comedy",
+        "drama",
+        "thriller",
+        "horror",
+        "adventure",
+      ];
+
+      for (const keyword of sortedKeywords) {
+        if (!keyword || keyword.length < 3) continue;
+        if (genericWords.includes(keyword.toLowerCase())) continue;
+
+        console.log(`  🔍 Trying TMDB search: "${keyword}"`);
+        tmdbResult = await tmdbService.searchMulti(keyword);
+        if (
+          tmdbResult &&
+          (tmdbResult.media_type === "movie" || tmdbResult.media_type === "tv")
+        ) {
+          break; // Found a match
+        }
+      }
+
+      // If keywords didn't work, try the original query as last resort
+      if (!tmdbResult) {
+        tmdbResult = await tmdbService.searchMulti(query);
+      }
+
+      if (
+        tmdbResult &&
+        (tmdbResult.media_type === "movie" || tmdbResult.media_type === "tv")
+      ) {
+        console.log(
+          `🔥 Reactive Import: Found "${tmdbResult.title || tmdbResult.name}" on TMDB. Importing...`,
+        );
+
+        // Import to DB
+        // Check duplication by title to avoid messy duplicates (optimistic check)
+        // Ideally we check externalId but we don't store it rigorously yet.
+        const existing = await prisma.mediaItem.findFirst({
+          where: {
+            title: tmdbResult.title || tmdbResult.name,
+            type: tmdbResult.media_type === "movie" ? "MOVIE" : "SHOW",
+          },
+        });
+
+        let newItem;
+        if (existing) {
+          newItem = await mediaService.getMediaById(existing.id);
+        } else {
+          newItem = await mediaService.createMedia({
+            type: tmdbResult.media_type === "movie" ? "MOVIE" : "SHOW",
+            title: (tmdbResult.title || tmdbResult.name)!, // bang ok checked above
+            description: tmdbResult.overview,
+            releaseYear: tmdbResult.release_date
+              ? parseInt(tmdbResult.release_date.split("-")[0])
+              : tmdbResult.first_air_date
+                ? parseInt(tmdbResult.first_air_date.split("-")[0])
+                : undefined,
+            posterUrl: tmdbService.getPosterUrl(tmdbResult.poster_path)!,
+            tags: [], // No tags initially
+          });
+        }
+
+        // Add to results
+        results.push({
+          id: newItem.id,
+          type: newItem.type,
+          title: newItem.title,
+          description: newItem.description,
+          releaseYear: newItem.releaseYear,
+          posterUrl: newItem.posterUrl,
+          score: 0.9, // High score for direct match
+          tags: newItem.tags.map((t) => ({ name: t.name })),
+        });
+      }
+    }
+
+    return results;
   } catch (error) {
     console.error("Smart search error:", error);
-    // Fallback to basic
     return await fallbackKeywordSearch(query, type, limit);
   }
 }
@@ -145,12 +256,66 @@ export async function getSimilarItems(
     throw ApiError.notFound("Media item not found");
   }
 
-  // Fallback to tags if no embedding
-  if (!media.embedding || media.embedding.values.length === 0) {
+  // 1. Try Pinecone Search
+  try {
+    const embeddingValues = parseEmbeddingValues(media.embedding.values);
+    if (
+      embeddingValues.length > 0 &&
+      (await pineconeService.isPineconeAvailable())
+    ) {
+      console.log("🌲 Using Pinecone for similarity...");
+      const pineconeResults = await pineconeService.queryVectors({
+        vector: embeddingValues,
+        topK: limit,
+        filter: !crossMedia ? { type: media.type } : undefined,
+      });
+
+      // Fetch full objects for the IDs returned by Pinecone
+      // We need to preserve the order/scores from Pinecone
+      const ids = pineconeResults
+        .filter((r) => r.id !== mediaId) // Exclude self
+        .map((r) => r.id);
+
+      if (ids.length > 0) {
+        const dbItems = await prisma.mediaItem.findMany({
+          where: { id: { in: ids } },
+          include: { tags: { include: { tag: true } } },
+        });
+
+        // Re-order and map
+        const itemMap = new Map(dbItems.map((i) => [i.id, i]));
+
+        return pineconeResults
+          .filter((r) => r.id !== mediaId && itemMap.has(r.id))
+          .map((r) => {
+            const item = itemMap.get(r.id)!;
+            return {
+              id: item.id,
+              type: item.type,
+              title: item.title,
+              description: item.description,
+              releaseYear: item.releaseYear,
+              posterUrl: item.posterUrl,
+              score: r.score,
+              tags: item.tags.map((t) => ({ name: t.tag.name })),
+            };
+          })
+          .slice(0, limit);
+      }
+    }
+  } catch (err) {
+    console.error("Pinecone search failed, falling back to local:", err);
+  }
+
+  // 2. Local Fallback (if Pinecone fails or unavailable)
+  const sourceEmbedding = media.embedding
+    ? parseEmbeddingValues(media.embedding.values)
+    : [];
+  if (sourceEmbedding.length === 0) {
     return await getSimilarByTags(media, limit, crossMedia);
   }
 
-  const queryEmbedding = media.embedding.values;
+  const queryEmbedding = sourceEmbedding;
 
   // Fetch candidates
   const candidates = await prisma.mediaItem.findMany({
@@ -166,10 +331,17 @@ export async function getSimilarItems(
 
   // Score
   const scored = candidates
-    .filter((c) => c.embedding && c.embedding.values.length > 0)
+    .filter((c) => {
+      if (!c.embedding) return false;
+      const vals = parseEmbeddingValues(c.embedding.values);
+      return vals.length > 0;
+    })
     .map((c) => ({
       item: c,
-      score: cosineSimilarity(queryEmbedding, c.embedding!.values),
+      score: cosineSimilarity(
+        queryEmbedding,
+        parseEmbeddingValues(c.embedding!.values),
+      ),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);

@@ -258,6 +258,32 @@ export async function isTmdbAvailable(): Promise<boolean> {
   }
 }
 
+/**
+ * Get popular movies
+ */
+export async function getPopularMovies(page = 1): Promise<TMDbSearchResult[]> {
+  if (!config.tmdb.apiKey && !config.tmdb.accessToken) {
+    console.warn("TMDb API not configured");
+    return [];
+  }
+
+  try {
+    const url = buildUrl("/movie/popular", { page: page.toString() });
+    const response = await fetch(url, { headers: getHeaders() });
+
+    if (!response.ok) {
+      console.error(`TMDb popular fetch failed: ${response.status}`);
+      return [];
+    }
+
+    const data = (await response.json()) as TMDbSearchResponse;
+    return data.results;
+  } catch (error) {
+    console.error("TMDb popular error:", error);
+    return [];
+  }
+}
+
 export default {
   searchMovie,
   searchTvShow,
@@ -266,4 +292,5 @@ export default {
   getBackdropUrl,
   fetchPosterForMedia,
   isTmdbAvailable,
+  getPopularMovies,
 };

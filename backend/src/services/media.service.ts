@@ -5,6 +5,9 @@ import type {
   CreateMediaInput,
   UpdateMediaInput,
 } from "../validations/media.validation.js";
+import * as tmdbService from "./tmdb.service.js";
+import * as embeddingService from "./embedding.service.js";
+import * as pineconeService from "./pinecone.service.js";
 
 export interface MediaWithTags {
   id: string;
@@ -27,7 +30,74 @@ export async function createMedia(
 ): Promise<MediaWithTags> {
   const { tags: tagNames, ...mediaData } = input;
 
-  // Create media with tags
+  // 1. Data Enrichment (TMDB)
+  // If we are missing critical data (poster/description), try to fetch from TMDB
+  if (!mediaData.posterUrl || !mediaData.description) {
+    try {
+      console.log(`🎬 Auto-enriching "${mediaData.title}" via TMDb...`);
+      const tmdbResult = await tmdbService.fetchPosterForMedia(
+        mediaData.type,
+        mediaData.title,
+        mediaData.releaseYear ?? undefined,
+      );
+
+      // Note: fetchPosterForMedia currently only returns URL, let's use searchMulti for full data
+      // or just assume if we got a URL we could also get description.
+      // For now, let's do a more robust search if description is missing.
+      if (!mediaData.description) {
+        let bestMatch: any = null;
+        if (mediaData.type === "MOVIE") {
+          bestMatch = await tmdbService.searchMovie(
+            mediaData.title,
+            mediaData.releaseYear ?? undefined,
+          );
+        } else if (mediaData.type === "SHOW") {
+          bestMatch = await tmdbService.searchTvShow(
+            mediaData.title,
+            mediaData.releaseYear ?? undefined,
+          );
+        }
+
+        if (bestMatch) {
+          mediaData.description = mediaData.description || bestMatch.overview;
+          mediaData.posterUrl =
+            mediaData.posterUrl ||
+            tmdbService.getPosterUrl(bestMatch.poster_path);
+          mediaData.releaseYear =
+            mediaData.releaseYear ||
+            (bestMatch.release_date
+              ? parseInt(bestMatch.release_date.split("-")[0])
+              : bestMatch.first_air_date
+                ? parseInt(bestMatch.first_air_date.split("-")[0])
+                : null);
+          console.log(`✅ Found match: ${bestMatch.title || bestMatch.name}`);
+        }
+      } else if (!mediaData.posterUrl) {
+        // Just fetch poster if that's all we need
+        const posterUrl = await tmdbService.fetchPosterForMedia(
+          mediaData.type,
+          mediaData.title,
+          mediaData.releaseYear ?? undefined,
+        );
+        if (posterUrl) mediaData.posterUrl = posterUrl;
+      }
+    } catch (error) {
+      console.warn("⚠️ TMDb enrichment failed:", error);
+      // Continue without enrichment
+    }
+  }
+
+  // 2. Generate Embedding
+  // Create text representation for vector
+  const embeddingText = embeddingService.createMediaEmbeddingText({
+    title: mediaData.title,
+    description: mediaData.description,
+    tags: tagNames,
+  });
+  const vectorValues =
+    await embeddingService.generateQueryEmbedding(embeddingText);
+
+  // 3. Create media with tags & embedding in Postgres
   const media = await prisma.mediaItem.create({
     data: {
       ...mediaData,
@@ -46,6 +116,12 @@ export async function createMedia(
             })),
           }
         : undefined,
+      embedding: {
+        create: {
+          values: JSON.stringify(vectorValues), // SQLite: store as JSON string
+          modelVersion: "Xenova/all-MiniLM-L6-v2",
+        },
+      },
     },
     include: {
       tags: {
@@ -53,6 +129,28 @@ export async function createMedia(
       },
     },
   });
+
+  // 4. Sync to Pinecone (Fire and Forget or Await?)
+  // Await to ensure consistency for now.
+  try {
+    if (await pineconeService.isPineconeAvailable()) {
+      await pineconeService.upsertVector({
+        id: media.id,
+        values: vectorValues,
+        metadata: {
+          mediaId: media.id,
+          type: media.type,
+          title: media.title,
+          releaseYear: media.releaseYear ?? undefined,
+          tags: media.tags.map((t) => t.tag.name),
+        },
+      });
+      console.log(`🌲 Synced "${media.title}" to Pinecone`);
+    }
+  } catch (error) {
+    console.error("⚠️ Pinecone sync failed:", error);
+    // Don't fail the request, just log
+  }
 
   return {
     ...media,
@@ -161,8 +259,8 @@ export async function searchMedia(params: {
     AND: [
       {
         OR: [
-          { title: { contains: query, mode: "insensitive" as const } },
-          { description: { contains: query, mode: "insensitive" as const } },
+          { title: { contains: query } }, // SQLite: LIKE is case-insensitive by default
+          { description: { contains: query } },
         ],
       },
       type ? { type } : {},
